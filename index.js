@@ -33,31 +33,23 @@ app.post('/webhook', async (req, res) => {
       const sender = event.sender.id;
 
       if (event.message && event.message.text) {
-        const text = event.message.text;
+        const text = event.message.text.trim();
         const chapterMatch = text.match(/(?:الفصل|chapter)?\s*(\d+)/i);
         const mangaName = text.replace(/الفصل\s*\d+/i, '').trim();
 
         if (chapterMatch) {
           const chapterNum = chapterMatch[1];
           const images = await fetchChapter(mangaName, chapterNum);
-          for (const img of images) await sendImage(sender, img);
-          await sendText(sender, `📘 الفصل التالي: ${parseInt(chapterNum) + 1}`);
+          if (images.length === 0) {
+            await sendText(sender, `❌ لم يتم العثور على الفصل ${chapterNum} للمانجا "${mangaName}".`);
+          } else {
+            for (const img of images) await sendImage(sender, img);
+            await sendText(sender, `📘 الفصل التالي: ${parseInt(chapterNum) + 1}`);
+          }
         } else {
           const info = await fetchManga(mangaName);
-          const buttons = Array.from({ length: Math.min(5, info.totalChapters) }, (_, i) => ({
-            type: 'postback',
-            title: `الفصل ${i + 1}`,
-            payload: `CHAPTER_${i + 1}_${mangaName}`
-          }));
-          await sendCard(sender, info, buttons);
+          await sendCard(sender, info);
         }
-      }
-
-      if (event.postback && event.postback.payload.startsWith('CHAPTER_')) {
-        const [, chap, name] = event.postback.payload.split('_');
-        const images = await fetchChapter(name, chap);
-        for (const img of images) await sendImage(sender, img);
-        await sendText(sender, `📘 الفصل التالي: ${parseInt(chap) + 1}`);
       }
     }
     res.status(200).send('EVENT_RECEIVED');
@@ -87,24 +79,15 @@ async function sendImage(sender, url) {
   });
 }
 
-async function sendCard(sender, info, buttons) {
-  await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_TOKEN}`, {
-    recipient: { id: sender },
-    message: {
-      attachment: {
-        type: 'template',
-        payload: {
-          template_type: 'generic',
-          elements: [{
-            title: info.title,
-            image_url: info.cover,
-            subtitle: info.description + '\n📚 ' + info.genres,
-            buttons
-          }]
-        }
-      }
-    }
-  });
+async function sendCard(sender, info) {
+  if (!info.cover) {
+    return sendText(sender, `❌ لم يتم العثور على المانجا "${info.title}".`);
+  }
+
+  const message = `📖 ${info.title}\n\n${info.description}\n\n📚 التصنيفات: ${info.genres}\n📘 عدد الفصول: ${info.totalChapters}\n\n✏️ لعرض صور فصل، اكتب مثلًا:\n"${info.title} الفصل 1"`;
+
+  await sendImage(sender, info.cover);
+  await sendText(sender, message);
 }
 
 // ========== جلب معلومات المانجا ==========
@@ -135,7 +118,7 @@ async function fetchManga(title) {
     const totalChapters = chapters.length;
 
     return {
-      title: titleText,
+      title: titleText || title,
       cover,
       description,
       genres: genres.join(', '),
