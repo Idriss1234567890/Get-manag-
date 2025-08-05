@@ -10,12 +10,11 @@ app.use(bodyParser.json());
 const PAGE_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-// Webhook verify
+// تحقق webhook
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
     res.status(200).send(challenge);
   } else {
@@ -23,10 +22,9 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Webhook post
+// استقبال رسائل فيسبوك
 app.post('/webhook', async (req, res) => {
   const body = req.body;
-
   if (body.object === 'page') {
     for (const entry of body.entry) {
       const event = entry.messaging[0];
@@ -48,7 +46,8 @@ app.post('/webhook', async (req, res) => {
           }
         } else {
           const info = await fetchManga(mangaName);
-          await sendCard(sender, info);
+          await sendImage(sender, info.cover);
+          await sendText(sender, `📖 ${info.title}\n\n${info.description}\n\n📚 التصنيفات: ${info.genres}\n📘 عدد الفصول: ${info.totalChapters}\n\n✏️ لعرض صور فصل، اكتب:\n"${info.title} الفصل 1"`);
         }
       }
     }
@@ -58,8 +57,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// ========== إرسال رسائل ==========
-
+// إرسال نص
 async function sendText(sender, text) {
   await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_TOKEN}`, {
     recipient: { id: sender },
@@ -67,7 +65,9 @@ async function sendText(sender, text) {
   });
 }
 
+// إرسال صورة
 async function sendImage(sender, url) {
+  if (!url) return;
   await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_TOKEN}`, {
     recipient: { id: sender },
     message: {
@@ -79,19 +79,7 @@ async function sendImage(sender, url) {
   });
 }
 
-async function sendCard(sender, info) {
-  if (!info.cover) {
-    return sendText(sender, `❌ لم يتم العثور على المانجا "${info.title}".`);
-  }
-
-  const message = `📖 ${info.title}\n\n${info.description}\n\n📚 التصنيفات: ${info.genres}\n📘 عدد الفصول: ${info.totalChapters}\n\n✏️ لعرض صور فصل، اكتب مثلًا:\n"${info.title} الفصل 1"`;
-
-  await sendImage(sender, info.cover);
-  await sendText(sender, message);
-}
-
-// ========== جلب معلومات المانجا ==========
-
+// جلب معلومات مانجا
 async function fetchManga(title) {
   try {
     const searchUrl = `https://www.onma.top/search`;
@@ -122,16 +110,14 @@ async function fetchManga(title) {
       cover,
       description,
       genres: genres.join(', '),
-      totalChapters,
-      link
+      totalChapters
     };
   } catch (err) {
     return { title, cover: '', description: '⚠️ حدث خطأ أثناء جلب البيانات', genres: '', totalChapters: 0 };
   }
 }
 
-// ========== جلب صور الفصل ==========
-
+// جلب صور فصل مانجا
 async function fetchChapter(mangaName, chapterNumber) {
   try {
     const searchUrl = `https://www.onma.top/search`;
